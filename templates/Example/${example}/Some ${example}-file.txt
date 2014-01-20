@@ -1,0 +1,5 @@
+Hi.
+
+This file's contents should be replaced by the tool.
+
+This next word ${example} should be substituted.

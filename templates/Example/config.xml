@@ -1,0 +1,7 @@
+<template>
+	<name>Test skeleton</name>
+	<description>Just a test.</description>
+	<parameters>
+		<param name="example" description="Input some example string"/>
+	</parameters>
+</template>
