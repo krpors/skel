@@ -17,7 +17,7 @@ const (
 )
 
 var (
-	flagIn     *string = flag.String("in", "", "input skeleton/template directory")
+	flagIn     *string = flag.String("in", "", "input skeleton directory")
 	flagDryRun *bool   = flag.Bool("dry", false, "initate a dry run (i.e. do not create files/dirs)")
 	flagOut    *string = flag.String("out", "./__out/", "output directory with the generated structure")
 )
@@ -54,10 +54,10 @@ func NewSkeleton(location string, config SkeletonConfig) *Skeleton {
 	return t
 }
 
-// Basic template structure.
+// Basic skeleton structure.
 type Skeleton struct {
-	Location      string            // location of the template
-	Config        SkeletonConfig    // template configuration (parsed from XML)
+	Location      string            // location of the skeleton
+	Config        SkeletonConfig    // skeleton configuration (parsed from XML)
 	Outdir        string            // Output directory
 	Dryrun        bool              // whether it's a dry run, without output
 	KeyValues     map[string]string // substitutable keys and their values
@@ -124,13 +124,13 @@ func (t Skeleton) walkFunc(path string, info os.FileInfo, err error) error {
 	return nil
 }
 
-// Parses a single template directory, returns a template or an error
-// when the template dir did not contain a (valid) config.xml file.
+// Parses a single skeleton directory, returns a skeleton or an error
+// when the skeleton dir did not contain a (valid) config.xml file.
 func ParseSkeleton(tdir string) (*Skeleton, error) {
 	pathtoconfig := filepath.Join(tdir, "config.xml")
 	cfg, err := os.Open(pathtoconfig)
 	if err != nil {
-		// config file not found, not a template
+		// config file not found, not a skeleton
 		return nil, err
 	}
 
@@ -144,9 +144,9 @@ func ParseSkeleton(tdir string) (*Skeleton, error) {
 
 	location := filepath.Dir(cfg.Name())
 
-	template := NewSkeleton(location, tmplConfig)
+	skeleton := NewSkeleton(location, tmplConfig)
 
-	return template, nil
+	return skeleton, nil
 }
 
 // Reads user input from stdin to get a map with param names and their values.
@@ -185,14 +185,14 @@ func main() {
 	}
 
 	if *flagIn == "" {
-		fmt.Fprintf(os.Stderr, "No template specified")
+		fmt.Fprintf(os.Stderr, "No skeleton specified")
 		os.Exit(1)
 	}
 
-	fmt.Printf("Opening template '%s'\n", *flagIn)
+	fmt.Printf("Opening skeleton '%s'\n", *flagIn)
 	t, err := ParseSkeleton(*flagIn)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error opening template: %s\n", err)
+		fmt.Fprintf(os.Stderr, "Error opening skeleton: %s\n", err)
 		os.Exit(1)
 	}
 
