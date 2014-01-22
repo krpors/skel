@@ -17,35 +17,36 @@ const (
 )
 
 var (
-	flagTemplate  *string = flag.String("template", "", "template to execute")
-	flagDryRun    *bool   = flag.Bool("dry", false, "initate a dry run (i.e. do not create files/dirs)")
-	flagOutputDir *string = flag.String("output", "./__out/", "output directory")
+	flagIn     *string = flag.String("in", "", "input skeleton/template directory")
+	flagDryRun *bool   = flag.Bool("dry", false, "initate a dry run (i.e. do not create files/dirs)")
+	flagOut    *string = flag.String("out", "./__out/", "output directory with the generated structure")
 )
 
 func usage() {
 	fmt.Fprintf(os.Stderr, "%s v%s\n\n", os.Args[0], VERSION)
-	fmt.Fprintf(os.Stderr, "Generates directories, files and contents based on a 'template' structure.\n")
-	fmt.Fprintf(os.Stderr, "All values in the form of ${x} are substituted. Values for these variables\n")
-	fmt.Fprintf(os.Stderr, "are requested on stdin when a correct template is specified.\n\n")
+	fmt.Fprintf(os.Stderr, "Generates directories, files and contents based on a 'skeleton' structure.\n")
+	fmt.Fprintf(os.Stderr, "All values in the form of ${x} are substituted, in directory/file names,\n")
+	fmt.Fprintf(os.Stderr, "but also in content of files. The values for these variables are requested\n")
+	fmt.Fprintf(os.Stderr, "on the standard input when a correct skeleton input is specified.\n\n")
 
 	fmt.Fprintf(os.Stderr, "Usage:\n\n")
 	flag.PrintDefaults()
 }
 
-// Template configuration XML file
-type TemplateConfig struct {
+// Skeleton configuration XML file
+type SkeletonConfig struct {
 	Name        string           `xml:"name"`
 	Description string           `xml:"description"`
-	Parameters  []TemplateParams `xml:"parameters>param"`
+	Parameters  []SkeletonParams `xml:"parameters>param"`
 }
 
-type TemplateParams struct {
+type SkeletonParams struct {
 	Name        string `xml:"name,attr"`
 	Description string `xml:"description,attr"`
 }
 
-func NewTemplate(location string, config TemplateConfig) *Template {
-	t := new(Template)
+func NewSkeleton(location string, config SkeletonConfig) *Skeleton {
+	t := new(Skeleton)
 	t.Location = location
 	t.Config = config
 	t.regex = regexp.MustCompile("\\${(.+)}")
@@ -54,9 +55,9 @@ func NewTemplate(location string, config TemplateConfig) *Template {
 }
 
 // Basic template structure.
-type Template struct {
+type Skeleton struct {
 	Location      string            // location of the template
-	Config        TemplateConfig    // template configuration (parsed from XML)
+	Config        SkeletonConfig    // template configuration (parsed from XML)
 	Outdir        string            // Output directory
 	Dryrun        bool              // whether it's a dry run, without output
 	KeyValues     map[string]string // substitutable keys and their values
@@ -67,7 +68,7 @@ type Template struct {
 
 // Finds occurences in the src string of ${..} vars and will substitute them
 // with any given values in the KeyValues map.
-func (t Template) findReplace(src string) string {
+func (t Skeleton) findReplace(src string) string {
 	for k, v := range t.KeyValues {
 		haha := fmt.Sprintf("${%s}", k)
 		src = strings.Replace(src, haha, v, -1)
@@ -81,11 +82,11 @@ func (t Template) findReplace(src string) string {
 	return src
 }
 
-func (t Template) Walk() {
+func (t Skeleton) Walk() {
 	filepath.Walk(t.Location, t.walkFunc)
 }
 
-func (t Template) walkFunc(path string, info os.FileInfo, err error) error {
+func (t Skeleton) walkFunc(path string, info os.FileInfo, err error) error {
 	// cut down the first two elements from the path to create the target portion
 	split := strings.Split(path, string(os.PathSeparator))
 
@@ -125,7 +126,7 @@ func (t Template) walkFunc(path string, info os.FileInfo, err error) error {
 
 // Parses a single template directory, returns a template or an error
 // when the template dir did not contain a (valid) config.xml file.
-func ParseTemplate(tdir string) (*Template, error) {
+func ParseSkeleton(tdir string) (*Skeleton, error) {
 	pathtoconfig := filepath.Join(tdir, "config.xml")
 	cfg, err := os.Open(pathtoconfig)
 	if err != nil {
@@ -138,18 +139,18 @@ func ParseTemplate(tdir string) (*Template, error) {
 		return nil, err
 	}
 
-	tmplConfig := TemplateConfig{}
+	tmplConfig := SkeletonConfig{}
 	xml.Unmarshal(confData, &tmplConfig)
 
 	location := filepath.Dir(cfg.Name())
 
-	template := NewTemplate(location, tmplConfig)
+	template := NewSkeleton(location, tmplConfig)
 
 	return template, nil
 }
 
 // Reads user input from stdin to get a map with param names and their values.
-func ReadUserInput(t *Template) map[string]string {
+func ReadUserInput(t *Skeleton) map[string]string {
 	paramvals := make(map[string]string)
 
 	bio := bufio.NewReader(os.Stdin)
@@ -183,13 +184,13 @@ func main() {
 		os.Exit(1)
 	}
 
-	if *flagTemplate == "" {
+	if *flagIn == "" {
 		fmt.Fprintf(os.Stderr, "No template specified")
 		os.Exit(1)
 	}
 
-	fmt.Printf("Opening template '%s'\n", *flagTemplate)
-	t, err := ParseTemplate(*flagTemplate)
+	fmt.Printf("Opening template '%s'\n", *flagIn)
+	t, err := ParseSkeleton(*flagIn)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error opening template: %s\n", err)
 		os.Exit(1)
@@ -200,7 +201,7 @@ func main() {
 	}
 
 	t.Dryrun = *flagDryRun
-	t.Outdir = *flagOutputDir
+	t.Outdir = *flagOut
 
 	fmt.Printf("%s: %s\n", t.Config.Name, t.Config.Description)
 	fmt.Printf("%d configurable parameter(s) defined\n", len(t.Config.Parameters))
