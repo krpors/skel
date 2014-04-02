@@ -1,15 +1,19 @@
 package main
 
 import (
+	"archive/zip"
 	"bufio"
 	"encoding/xml"
 	"flag"
 	"fmt"
+	"io"
 	"io/ioutil"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 )
 
 const (
@@ -17,7 +21,7 @@ const (
 )
 
 var (
-	flagIn     *string = flag.String("in", "", "input skeleton directory")
+	flagIn     *string = flag.String("in", "", "input skeleton directory or zip file")
 	flagDryRun *bool   = flag.Bool("dry", false, "initate a dry run (i.e. do not create files/dirs)")
 	flagOut    *string = flag.String("out", "./__out/", "output directory with the generated structure")
 )
@@ -46,11 +50,16 @@ type SkeletonParams struct {
 }
 
 func NewSkeleton(location string, config SkeletonConfig) *Skeleton {
+	rand.Seed(time.Now().UnixNano()) // seed with time
+
 	t := new(Skeleton)
 	t.Location = location
 	t.Config = config
 	t.regex = regexp.MustCompile("\\${(.+)}")
 	t.Unsubstituted = make(map[string]bool)
+
+	t.outDirBase = fmt.Sprintf("%s-%d", t.Config.Name, rand.Int())
+
 	return t
 }
 
@@ -62,6 +71,8 @@ type Skeleton struct {
 	Dryrun        bool              // whether it's a dry run, without output
 	KeyValues     map[string]string // substitutable keys and their values
 	Unsubstituted map[string]bool   // Unsubstituted particles
+
+	outDirBase string // base output directory, which is the skeleton name + random int
 
 	regex *regexp.Regexp
 }
@@ -87,40 +98,41 @@ func (t Skeleton) Walk() {
 }
 
 func (t Skeleton) walkFunc(path string, info os.FileInfo, err error) error {
-	// cut down the first two elements from the path to create the target portion
-	split := strings.Split(path, string(os.PathSeparator))
+	x := filepath.Clean(t.Location)
+	y := filepath.Clean(path)
+	// remove the template location path from the walked path
+	// TODO document this ffs
+	newp := strings.Replace(y, x, "", -1)
 
-	if len(split) > 2 {
-		targetpath := filepath.Join(split[2:]...)
-		targetpath = filepath.Join(t.Outdir, targetpath)
-		targetpath = t.findReplace(targetpath) // substitute with variables
+	targetpath := filepath.Join(t.Outdir, t.outDirBase, newp)
+	targetpath = t.findReplace(targetpath) // substitute with variables
 
-		if info.IsDir() {
-			// create directory
-			fmt.Println("Creating dir:  ", t.findReplace(targetpath))
-			if !t.Dryrun {
-				os.MkdirAll(targetpath, os.ModeDir)
-			}
-		} else {
-			// create file and substitute
-			fmt.Println("Creating file: ", targetpath)
-			if !t.Dryrun {
-				os.Create(targetpath)
-			}
-			// read original contents, write contents
-			origBytes, err := ioutil.ReadFile(path)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "failed to open file '%s': %s\n", path, err)
-				return nil
-			}
-
-			if !t.Dryrun {
-				newcontents := t.findReplace(string(origBytes))
-				ioutil.WriteFile(targetpath, []byte(newcontents), os.ModePerm)
-			}
-
+	if info.IsDir() {
+		// create directory
+		fmt.Println("Creating dir:  ", t.findReplace(targetpath))
+		if !t.Dryrun {
+			os.MkdirAll(targetpath, os.ModeDir)
 		}
+	} else {
+		// create file and substitute
+		fmt.Println("Creating file: ", targetpath)
+		if !t.Dryrun {
+			os.Create(targetpath)
+		}
+		// read original contents, write contents
+		origBytes, err := ioutil.ReadFile(path)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "failed to open file '%s': %s\n", path, err)
+			return nil
+		}
+
+		if !t.Dryrun {
+			newcontents := t.findReplace(string(origBytes))
+			ioutil.WriteFile(targetpath, []byte(newcontents), os.ModePerm)
+		}
+
 	}
+
 	return nil
 }
 
@@ -131,7 +143,7 @@ func ParseSkeleton(tdir string) (*Skeleton, error) {
 	cfg, err := os.Open(pathtoconfig)
 	if err != nil {
 		// config file not found, not a skeleton
-		return nil, err
+		return nil, fmt.Errorf("Unable to open skeleton 'config.xml': %s\n", err)
 	}
 
 	confData, err := ioutil.ReadAll(cfg)
@@ -175,6 +187,58 @@ func ReadUserInput(t *Skeleton) map[string]string {
 	return paramvals
 }
 
+// Attempts to unzip the given file to the temp directory. Will return the output
+// directory or an error when anything failed.
+func Unzip(zipfile string) (gendir string, err error) {
+	r, err := zip.OpenReader(zipfile)
+	if err != nil {
+		return "", err
+	}
+	defer r.Close()
+
+	// create temp dir
+	targetDir, err := ioutil.TempDir("", "skel")
+	if err != nil {
+		return "", err
+	}
+
+	fmt.Printf("Using temporary directory '%s'\n", targetDir)
+
+	for _, f := range r.File {
+		rc, err := f.Open()
+		if err != nil {
+			return targetDir, err
+		}
+
+		// the file or directory to be created
+		creationTarget := filepath.Join(targetDir, f.Name)
+
+		// create file in created directory
+		if f.FileInfo().IsDir() {
+			fmt.Printf("Creating directory '%s'\n", f.Name)
+			err := os.MkdirAll(creationTarget, 0755)
+			if err != nil {
+				return targetDir, err
+			}
+		} else {
+			// it's a file, create it.
+			newfile, err := os.Create(creationTarget)
+			if err != nil {
+				return targetDir, err
+			}
+			fmt.Printf("Unzipping file '%s'\n", f.Name)
+			_, err = io.Copy(newfile, rc)
+			if err != nil {
+				return targetDir, err
+			}
+		}
+
+		rc.Close()
+	}
+
+	return targetDir, nil
+}
+
 // Start of this heap.
 func main() {
 	flag.Usage = usage
@@ -185,19 +249,47 @@ func main() {
 	}
 
 	if *flagIn == "" {
-		fmt.Fprintf(os.Stderr, "No skeleton specified")
+		fmt.Fprintf(os.Stderr, "No skeleton specified.\n")
 		os.Exit(1)
 	}
 
 	fmt.Printf("Opening skeleton '%s'\n", *flagIn)
-	t, err := ParseSkeleton(*flagIn)
+
+	// determine type of input (directory or zip file)
+	fileOrDir, err := os.Open(*flagIn)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error opening skeleton: %s\n", err)
+		fmt.Fprintf(os.Stderr, "Unable to open input directory or file '%s': %s\n", *flagIn, err)
+		os.Exit(1)
+	}
+
+	stat, err := fileOrDir.Stat()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Unable to stat '%s': %s\n", *flagIn, err)
 		os.Exit(1)
 	}
 
 	if *flagDryRun {
 		fmt.Printf("This run will not have any effect (dry-run)!\n\n")
+	}
+
+	var targetFileDir string = *flagIn
+
+	if !stat.IsDir() {
+		tdir, err := Unzip(*flagIn)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "ZIP does not seem to be OK: %s\n", err)
+			os.Exit(1)
+		}
+
+		targetFileDir = tdir
+	}
+
+	// TODO: clean up the temp dir from the unzipped contents
+
+	t, err := ParseSkeleton(targetFileDir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error opening skeleton: %s\n", err)
+		os.Exit(1)
 	}
 
 	t.Dryrun = *flagDryRun
