@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
-	"math/rand"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -17,13 +16,14 @@ import (
 )
 
 const (
-	VERSION = "1.0"
+	VERSION = "1.1"
 )
 
 var (
-	flagIn     *string = flag.String("in", "", "input skeleton directory or zip file")
-	flagDryRun *bool   = flag.Bool("dry", false, "initate a dry run (i.e. do not create files/dirs)")
-	flagOut    *string = flag.String("out", "./__out/", "output directory with the generated structure")
+	flagVerbose *bool   = flag.Bool("verbose", false, "enable verbose output")
+	flagIn      *string = flag.String("in", "", "input skeleton directory or zip file")
+	flagDryRun  *bool   = flag.Bool("dry", false, "initate a dry run (i.e. do not create files/dirs)")
+	flagOut     *string = flag.String("out", "./__out/", "output directory with the generated structure")
 )
 
 func usage() {
@@ -50,15 +50,13 @@ type SkeletonParams struct {
 }
 
 func NewSkeleton(location string, config SkeletonConfig) *Skeleton {
-	rand.Seed(time.Now().UnixNano()) // seed with time
-
 	t := new(Skeleton)
 	t.Location = location
 	t.Config = config
 	t.regex = regexp.MustCompile("\\${(.+)}")
 	t.Unsubstituted = make(map[string]bool)
 
-	t.outDirBase = fmt.Sprintf("%s-%d", t.Config.Name, rand.Int())
+	t.outDirBase = fmt.Sprintf("%s-%d", t.Config.Name, time.Now().UnixNano())
 
 	return t
 }
@@ -109,13 +107,17 @@ func (t Skeleton) walkFunc(path string, info os.FileInfo, err error) error {
 
 	if info.IsDir() {
 		// create directory
-		fmt.Println("Creating dir:  ", t.findReplace(targetpath))
+		if *flagVerbose {
+			fmt.Println("Creating dir:  ", t.findReplace(targetpath))
+		}
 		if !t.Dryrun {
 			os.MkdirAll(targetpath, os.ModeDir)
 		}
 	} else {
 		// create file and substitute
-		fmt.Println("Creating file: ", targetpath)
+		if *flagVerbose {
+			fmt.Println("Creating file: ", targetpath)
+		}
 		if !t.Dryrun {
 			os.Create(targetpath)
 		}
@@ -202,7 +204,9 @@ func Unzip(zipfile string) (gendir string, err error) {
 		return "", err
 	}
 
-	fmt.Printf("Using temporary directory '%s'\n", targetDir)
+	if *flagVerbose {
+		fmt.Printf("Using temporary directory '%s'\n", targetDir)
+	}
 
 	for _, f := range r.File {
 		rc, err := f.Open()
@@ -215,7 +219,9 @@ func Unzip(zipfile string) (gendir string, err error) {
 
 		// create file in created directory
 		if f.FileInfo().IsDir() {
-			fmt.Printf("Creating directory '%s'\n", f.Name)
+			if *flagVerbose {
+				fmt.Printf("Creating directory '%s'\n", f.Name)
+			}
 			err := os.MkdirAll(creationTarget, 0755)
 			if err != nil {
 				return targetDir, err
@@ -226,7 +232,9 @@ func Unzip(zipfile string) (gendir string, err error) {
 			if err != nil {
 				return targetDir, err
 			}
-			fmt.Printf("Unzipping file '%s'\n", f.Name)
+			if *flagVerbose {
+				fmt.Printf("Unzipping file '%s'\n", f.Name)
+			}
 			_, err = io.Copy(newfile, rc)
 			if err != nil {
 				return targetDir, err
@@ -269,9 +277,11 @@ func main() {
 	}
 
 	if *flagDryRun {
-		fmt.Printf("This run will not have any effect (dry-run)!\n\n")
+		fmt.Printf("This run will not have any effect (dry-run)!\n")
 	}
 
+	// indicator whether we used a zipfile or no.
+	var isZip bool = false
 	var targetFileDir string = *flagIn
 
 	if !stat.IsDir() {
@@ -281,6 +291,7 @@ func main() {
 			os.Exit(1)
 		}
 
+		isZip = true
 		targetFileDir = tdir
 	}
 
@@ -295,8 +306,15 @@ func main() {
 	t.Dryrun = *flagDryRun
 	t.Outdir = *flagOut
 
-	fmt.Printf("%s: %s\n", t.Config.Name, t.Config.Description)
+	fmt.Println()
+	fmt.Printf("Skeleton:    %s\n", t.Config.Name)
+	fmt.Printf("Description: %s\n\n", t.Config.Description)
 	fmt.Printf("%d configurable parameter(s) defined\n", len(t.Config.Parameters))
+	if *flagVerbose {
+		for _, params := range t.Config.Parameters {
+			fmt.Printf("  ${%s}: %s\n", params.Name, params.Description)
+		}
+	}
 
 	themap := ReadUserInput(t)
 
@@ -307,6 +325,18 @@ func main() {
 		fmt.Printf("\nWarning: the following variables were left unsubstituted:\n\n")
 		for k, _ := range t.Unsubstituted {
 			fmt.Printf("\t%s\n", k)
+		}
+	}
+
+	// remove temporary directory
+	if isZip {
+		if *flagVerbose {
+			fmt.Printf("Removing unzip directory '%s'\n", targetFileDir)
+		}
+		err := os.RemoveAll(targetFileDir)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Unable to remove directory '%s': %s\n", targetFileDir, err)
+			os.Exit(1)
 		}
 	}
 }
