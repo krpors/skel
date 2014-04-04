@@ -111,7 +111,7 @@ func (t Skeleton) walkFunc(path string, info os.FileInfo, err error) error {
 			fmt.Println("Creating dir:  ", t.findReplace(targetpath))
 		}
 		if !t.Dryrun {
-			os.MkdirAll(targetpath, os.ModeDir)
+			os.MkdirAll(targetpath, 0755)
 		}
 	} else {
 		// create file and substitute
