@@ -247,6 +247,18 @@ func Unzip(zipfile string) (gendir string, err error) {
 	return targetDir, nil
 }
 
+func cleanup(targetFileDir string) {
+	if *flagVerbose {
+		fmt.Printf("Removing unzip directory '%s'\n", targetFileDir)
+	}
+	err := os.RemoveAll(targetFileDir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Unable to remove directory '%s': %s\n", targetFileDir, err)
+		os.Exit(1)
+	}
+
+}
+
 // Start of this heap.
 func main() {
 	flag.Usage = usage
@@ -308,8 +320,8 @@ func main() {
 
 	fmt.Println()
 	fmt.Printf("Skeleton:    %s\n", t.Config.Name)
-	fmt.Printf("Description: %s\n\n", t.Config.Description)
-	fmt.Printf("%d configurable parameter(s) defined\n", len(t.Config.Parameters))
+	fmt.Printf("Description:\n\n%s\n", t.Config.Description)
+	fmt.Printf("%d configurable parameter(s) defined:\n", len(t.Config.Parameters))
 	if *flagVerbose {
 		for _, params := range t.Config.Parameters {
 			fmt.Printf("  ${%s}: %s\n", params.Name, params.Description)
@@ -330,13 +342,6 @@ func main() {
 
 	// remove temporary directory
 	if isZip {
-		if *flagVerbose {
-			fmt.Printf("Removing unzip directory '%s'\n", targetFileDir)
-		}
-		err := os.RemoveAll(targetFileDir)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Unable to remove directory '%s': %s\n", targetFileDir, err)
-			os.Exit(1)
-		}
+		cleanup(targetFileDir)
 	}
 }
