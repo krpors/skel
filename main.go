@@ -319,8 +319,8 @@ func main() {
 	t.Outdir = *flagOut
 
 	fmt.Println()
-	fmt.Printf("Skeleton:    %s\n", t.Config.Name)
-	fmt.Printf("Description:\n\n%s\n", t.Config.Description)
+	fmt.Printf("%s\n", t.Config.Name)
+	fmt.Printf("%s\n\n", t.Config.Description)
 	fmt.Printf("%d configurable parameter(s) defined:\n", len(t.Config.Parameters))
 	if *flagVerbose {
 		for _, params := range t.Config.Parameters {
